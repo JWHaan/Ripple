@@ -1,0 +1,87 @@
+# Ripple Gate — Bitbucket WORKSPACE app.
+#
+# Scope boundary (enforced by `npm run check:scopes`): this manifest may contain only
+# `*:bitbucket` scopes and `storage:app`. Adding any Jira / Compass / Confluence /
+# Teamwork Graph scope makes `forge deploy` fail with
+# "Workspace scopes can not be used with site scopes".
+#
+# Install: forge install --product bitbucket --site bitbucket.org/<team-workspace>
+# After install a workspace admin must enable "Custom merge checks" and mark
+# "Ripple blast-radius gate" as Required (Required checks need Bitbucket Premium).
+app:
+  id: ari:cloud:ecosystem::app/0714660c-88e4-4b45-970c-3d0e586e0e16
+  runtime:
+    name: nodejs24.x
+  package:
+    bundler: manual@2026
+    path: dist
+
+modules:
+  # Async precompute. Delivery can lag by minutes, so the merge check never depends on it.
+  trigger:
+    - key: gate-pr-events
+      function: pr-event-fn
+      events:
+        - avi:bitbucket:created:pullrequest
+        - avi:bitbucket:updated:pullrequest
+
+  # The deterministic gate. Reads Gate storage only; makes no call to Brain on the merge path.
+  bitbucket:mergeCheck:
+    - key: ripple-merge-check
+      function: merge-check-fn
+      name: Ripple blast-radius gate
+      description: >-
+        Blocks merge until every downstream owning team has signed off on the
+        current commit, or the author has accepted the risk and a Jira ticket
+        has been filed.
+      triggers:
+        - on-code-pushed
+        - on-merge
+
+  # UI phase (not built yet) — uncomment together with the panel-resolver-fn function and
+  # the panel-ui resource below once the frontend exists:
+  # bitbucket:repoPullRequestOverviewPanel:
+  #   - key: ripple-panel
+  #     title: Ripple — blast radius
+  #     resource: panel-ui
+  #     render: native
+  #     resolver:
+  #       function: panel-resolver-fn
+
+  # Inbound half of the inter-app contract: Brain -> Gate `POST /v1/verdict`.
+  # Public URL; every request is authenticated in-handler with HMAC-SHA256
+  # (packages/contracts/src/signing.ts).
+  webtrigger:
+    - key: gate-api
+      function: gate-api-fn
+      urlFormat: v2
+      response:
+        type: dynamic
+
+  function:
+    - key: pr-event-fn
+      handler: index.onPullRequestEvent
+    - key: merge-check-fn
+      handler: index.runMergeCheck
+    # - key: panel-resolver-fn
+    #   handler: index.panelResolver
+    - key: gate-api-fn
+      handler: index.gateApi
+
+# resources:
+#   - key: panel-ui
+#     path: src/frontend/index.tsx
+
+permissions:
+  scopes:
+    # PR events, merge-check subscription, PR metadata and diff.
+    - read:pullrequest:bitbucket
+    # Read compass.yml / compass.yaml at the PR head commit, and repo full_name / URL.
+    - read:repository:bitbucket
+    # Gate state, signoffs, audit log (Forge KVS).
+    - storage:app
+  external:
+    fetch:
+      backend:
+        # Outbound half of the inter-app contract: Gate -> Brain web trigger (urlFormat v2 host).
+        - address: '*.webtrigger.atlassian.app'

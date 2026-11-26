@@ -1,0 +1,29 @@
+{
+  "name": "ripple",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Ripple — pre-merge blast radius and accountability gate for Bitbucket Cloud (two Forge apps: Gate + Brain)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -b packages/contracts",
+    "typecheck": "npm run build && tsc -p packages/contracts/tsconfig.test.json && tsc -p apps/gate && tsc -p apps/brain && tsc -p tests",
+    "test": "node --test \"packages/contracts/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\" \"tests/**/*.test.ts\"",
+    "check:no-any": "! rg -n --glob '*.ts' --glob '*.tsx' --glob '!**/dist/**' --glob '!**/node_modules/**' '(:|<|,|\\bas)\\s*any\\b|\\bany\\[\\]' packages apps tests",
+    "check:scopes": "node scripts/check-scope-boundary.mjs",
+    "verify": "npm run typecheck && npm test && npm run check:no-any && npm run check:scopes && npm run bundle",
+    "bundle": "node scripts/build-app.mjs gate && node scripts/build-app.mjs brain"
+  },
+  "devDependencies": {
+    "@forge/cli": "15.1.0",
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3"
+  },
+  "type": "module"
+}

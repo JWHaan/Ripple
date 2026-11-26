@@ -1,0 +1,27 @@
+{
+  "name": "@ripple/contracts",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Shared wire contract (v1) and HMAC signing for the Ripple Gate <-> Brain webtrigger API",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./fixtures": {
+      "types": "./dist/fixtures.d.ts",
+      "default": "./dist/fixtures.js"
+    }
+  },
+  "files": [
+    "dist",
+    "fixtures"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@ripple/brain",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@forge/api": "8.5.0",
+    "@forge/events": "3.0.10",
+    "@forge/kvs": "2.1.2",
+    "@forge/llm": "1.0.10",
+    "@ripple/contracts": "1.0.0",
+    "zod": "4.6.7"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/build-app.mjs brain"
+  }
+}

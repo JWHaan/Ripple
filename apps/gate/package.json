@@ -1,0 +1,16 @@
+{
+  "name": "@ripple/gate",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@forge/api": "8.5.0",
+    "@forge/kvs": "2.1.2",
+    "@ripple/contracts": "1.0.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/build-app.mjs gate"
+  }
+}

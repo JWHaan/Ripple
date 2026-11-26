@@ -1,0 +1,69 @@
+# Ripple Brain — Atlassian SITE app (Jira + Teamwork Graph).
+#
+# Scope boundary (enforced by `npm run check:scopes`): this manifest must never contain
+# a `*:bitbucket` scope. Workspace scopes and site scopes cannot share a manifest.
+#
+# Install: forge install --product jira --site <site>.atlassian.net
+app:
+  id: ari:cloud:ecosystem::app/439e8084-83f3-4a9c-ac2f-fd37ade55231
+  runtime:
+    name: nodejs24.x
+  package:
+    bundler: manual@2026
+    path: dist
+
+modules:
+  # Inbound half of the inter-app contract: Gate -> Brain
+  #   POST /v1/analyze, POST /v1/verdict (pull fallback). /v1/accept-risk arrives with the UI phase.
+  # Public URL; every request is authenticated in-handler with HMAC-SHA256
+  # (packages/contracts/src/signing.ts).
+  webtrigger:
+    - key: brain-api
+      function: brain-api-fn
+      urlFormat: v2
+      response:
+        type: dynamic
+
+  # /v1/analyze only enqueues; graph expansion + LLM run here, off the request path.
+  consumer:
+    - key: analysis-consumer
+      queue: ripple-analysis
+      function: analysis-worker-fn
+
+  # Forge LLMs (Atlassian-hosted). Explains impact; never decides the gate outcome.
+  llm:
+    - key: ripple-llm
+      model:
+        - claude
+
+  function:
+    - key: brain-api-fn
+      handler: index.brainApi
+    - key: analysis-worker-fn
+      handler: index.runAnalysis
+      # Graph expansion plus one LLM call; well above the default for async consumers.
+      timeoutSeconds: 300
+
+permissions:
+  # Map form (instead of a list) because Teamwork Graph can only be called as a user:
+  # the queue consumer impersonates the pull request author for the graph scopes.
+  scopes:
+    # Teamwork Graph `atlassianTeamsBySpace`: which teams own a Jira space (service domain).
+    read:graph:project:jira:
+      allowImpersonation: true
+    # Teamwork Graph curated query `atlassianTeamMembers` -> signoff rosters.
+    # A missing or ungranted graph scope yields EMPTY results, not an error.
+    read:graph:team:atlassian:
+      allowImpersonation: true
+    read:graph:user:atlassian:
+      allowImpersonation: true
+    # Jira REST: resolve a space key to its id, name and lead. Also the accept-risk flow (UI phase).
+    read:jira-work: {}
+    write:jira-work: {}
+    # Analysis records, risk-exception records, manual repo->component mappings (Forge KVS).
+    storage:app: {}
+  external:
+    fetch:
+      backend:
+        # Outbound half of the inter-app contract: Brain -> Gate web trigger (urlFormat v2 host).
+        - address: '*.webtrigger.atlassian.app'

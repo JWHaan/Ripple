@@ -1,0 +1,31 @@
+{
+  "v": "v1",
+  "key": { "workspaceUuid": "11111111-1111-4111-8111-111111111111", "repoUuid": "22222222-2222-4222-8222-222222222222", "prId": 7, "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+  "repo": { "fullName": "acme/auth-service", "url": "https://bitbucket.org/acme/auth-service" },
+  "pullRequest": {
+    "title": "Change token format",
+    "url": "https://bitbucket.org/acme/auth-service/pull-requests/7",
+    "authorAccountId": "712020:5fb4febc-facf-4d60-8076-a1c699000001",
+    "sourceBranch": "feature/token",
+    "destinationBranch": "main"
+  },
+  "diff": {
+    "filesChanged": 1,
+    "linesAdded": 1,
+    "linesRemoved": 1,
+    "findings": [
+      {
+        "ruleId": "D3.auth-token",
+        "kind": "AUTH_TOKEN",
+        "method": "PATH_PATTERN",
+        "severity": "HIGH",
+        "filePath": "src/auth/token.ts",
+        "statement": "Authentication, token or session code changed: src/auth/token.ts (+1 −1)",
+        "excerpt": "-  return jwt.sign({ sub: user.id }, key, { expiresIn: '1h' });\n+  return jwt.sign({ sub: user.id, tenant: user.tenantId }, key, { expiresIn: '15m' });",
+        "breaking": null
+      }
+    ],
+    "truncated": false
+  },
+  "service": { "id": "auth-service", "spaceKey": "PLAT", "downstream": ["MPLAT", "MOB"], "configPath": "ripple.yml", "configSource": "DESTINATION_BRANCH" }
+}
