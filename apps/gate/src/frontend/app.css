@@ -1,0 +1,70 @@
+/* Ripple panel — warm obsidian. All colour lives in tokens so a light theme is a token swap. */
+:root {
+  color-scheme: dark;
+  --bg: #181817;
+  --surface: #201f1d;
+  --surface-raised: #282724;
+  --border: #34322e;
+  --border-strong: #46433d;
+  --text: #ecebe6;
+  --muted: #a8a59c;
+  --faint: #75726a;
+
+  --accent: #e8a25a;
+  --accent-ink: #1d1409;
+  --ok: #86c596;
+  --warn: #e3b75e;
+  --danger: #ea7a64;
+  --info: #93b6dc;
+  --neutral: #a8a59c;
+
+  --radius: 24px;
+  --radius-inner: 14px;
+  --radius-pill: 999px;
+  --gap: 16px;
+
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

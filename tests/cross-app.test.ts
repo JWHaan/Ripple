@@ -25,8 +25,9 @@ import { runAnalysisJob } from '../apps/brain/src/worker.ts';
 import { requestAcceptRisk, requestSignoff } from '../apps/gate/src/actions.ts';
 import { evaluateMergeCheck } from '../apps/gate/src/merge-check.ts';
 import { handlePullRequestEvent } from '../apps/gate/src/pr-hook.ts';
+import { acceptRisk, getPanelView, panelContextFrom, submitSignoff, type PanelContext } from '../apps/gate/src/panel.ts';
 import { handleGateRequest } from '../apps/gate/src/router.ts';
-import { RIPPLE_YML, SHA_A, TEST_PR, TOKEN_DIFF, TYPO_DIFF, gateHarness } from '../apps/gate/src/testing/fakes.ts';
+import { RIPPLE_YML, SHA_A, SHA_B, TEST_PR, TOKEN_DIFF, TYPO_DIFF, gateHarness } from '../apps/gate/src/testing/fakes.ts';
 import type { MergeCheckEvent, PullRequestEvent } from '../apps/gate/src/types.ts';
 
 const GATE_URL = 'https://gate-install.webtrigger.atlassian.app/public/gate-id';
@@ -164,4 +165,81 @@ test('end to end: the author accepts risk; a Jira ticket is filed and the merge 
   const check = await evaluateMergeCheck(gateDeps, checkEvent);
   assert.deepEqual([check.status, check.state], ['PASSED', 'RISK_ACCEPTED']);
   assert.match(check.message, /RISK-1/);
+});
+
+// --- PR overview panel (resolver logic over the real Brain) ------------------------
+
+function panelAs(accountId: string, installContext = false): PanelContext {
+  const parsed = panelContextFrom({
+    accountId,
+    ...(installContext ? { installContext: `ari:cloud:bitbucket::workspace/${TEST_PR.workspaceUuid}` } : { workspaceId: `{${TEST_PR.workspaceUuid}}` }),
+    extension: { repository: { uuid: `{${TEST_PR.repoUuid}}` }, pullRequest: { id: TEST_PR.prId } },
+  });
+  assert.ok(parsed.ok);
+  return parsed.value;
+}
+
+test('panel: the invocation context identifies PR and viewer; anything malformed fails closed', () => {
+  assert.deepEqual(panelAs(MIA.accountId).pr, TEST_PR);
+  assert.deepEqual(panelAs(MIA.accountId, true).pr, TEST_PR);
+  assert.equal(panelContextFrom({ extension: { repository: { uuid: `{${TEST_PR.repoUuid}}` }, pullRequest: { id: 7 } } }).ok, false);
+  assert.equal(panelContextFrom({ accountId: MIA.accountId, workspaceId: 'nope', extension: { repository: { uuid: 'x' }, pullRequest: { id: 7 } } }).ok, false);
+});
+
+test('panel: the blocked PR shows its findings, outstanding spaces, and who the viewer is', async () => {
+  const { gateDeps } = await blockedLoop();
+  const view = await getPanelView(gateDeps, panelAs(AUTHOR.accountId));
+  assert.ok(view.status === 'READY');
+  assert.equal(view.headSha, SHA_A);
+  assert.equal(view.record.state, 'SIGNOFF_REQUIRED');
+  assert.equal(view.check.status, 'FAILED');
+  assert.deepEqual(view.outstandingSpaceKeys, ['MPLAT', 'MOB']);
+  assert.ok('diff' in view.record && view.record.diff.findings.length > 0);
+  assert.deepEqual([view.viewer.isPrAuthor, view.viewer.displayName, view.viewer.rosterSpaceKeys], [true, 'Pat Author', []]);
+
+  const mia = await getPanelView(gateDeps, panelAs(MIA.accountId));
+  assert.ok(mia.status === 'READY');
+  assert.deepEqual([mia.viewer.isPrAuthor, mia.viewer.displayName, mia.viewer.rosterSpaceKeys], [false, 'Mia Dev', ['MPLAT']]);
+});
+
+test('panel: the author is refused sign-off; a roster member signs and the view updates in the same call', async () => {
+  const { gateDeps, log } = await blockedLoop();
+  const self = await submitSignoff(gateDeps, panelAs(AUTHOR.accountId), { headSha: SHA_A, spaceKey: 'MPLAT' });
+  assert.ok(!self.ok);
+  assert.equal(self.reason, 'AUTHOR_CANNOT_SIGN');
+  assert.match(self.message, /accept the risk/);
+
+  const signed = await submitSignoff(gateDeps, panelAs(MIA.accountId), { headSha: SHA_A, spaceKey: 'MPLAT' });
+  assert.ok(signed.ok && signed.view.status === 'READY');
+  assert.deepEqual(signed.view.outstandingSpaceKeys, ['MOB']);
+  assert.ok(signed.view.record.state === 'SIGNOFF_REQUIRED');
+  assert.deepEqual(signed.view.record.signoffs.map((s) => [s.spaceKey, s.signer.displayName]), [['MPLAT', 'Mia Dev']]);
+  assert.deepEqual(log, ['POST /v1/signoff -> 200', 'POST /v1/decision -> 200', 'POST /v1/signoff -> 200'], 'the refused sign-off never reached Gate storage');
+});
+
+test('panel: a stale tab or a malformed payload is refused before Brain is asked', async () => {
+  const { gateDeps, log } = await blockedLoop();
+  const stale = await submitSignoff(gateDeps, panelAs(MIA.accountId), { headSha: SHA_B, spaceKey: 'MPLAT' });
+  assert.ok(!stale.ok && stale.reason === 'STALE_HEAD' && stale.view.status === 'READY');
+  const junk = await submitSignoff(gateDeps, panelAs(MIA.accountId), { headSha: SHA_A, spaceKey: 'not a key!' });
+  assert.ok(!junk.ok && junk.reason === 'INVALID_REQUEST');
+  const short = await acceptRisk(gateDeps, panelAs(AUTHOR.accountId), { headSha: SHA_A, justification: 'meh', dueDate: '2026-12-10' });
+  assert.ok(!short.ok && short.reason === 'INVALID_REQUEST');
+  const badDate = await acceptRisk(gateDeps, panelAs(AUTHOR.accountId), { headSha: SHA_A, justification: 'Hotfix for a production incident; consumers notified.', dueDate: '10/12/2026' });
+  assert.ok(!badDate.ok && badDate.reason === 'INVALID_REQUEST');
+  assert.deepEqual(log, []);
+});
+
+test('panel: the author accepts risk and the returned view carries the Jira ticket', async () => {
+  const { gateDeps } = await blockedLoop();
+  const result = await acceptRisk(gateDeps, panelAs(AUTHOR.accountId), {
+    headSha: SHA_A,
+    justification: 'Hotfix for a production incident; consumers notified.',
+    dueDate: '2026-12-10',
+  });
+  assert.ok(result.ok && result.view.status === 'READY');
+  assert.ok(result.view.record.state === 'RISK_ACCEPTED');
+  assert.equal(result.view.record.exception.ticket.issueKey, 'RISK-1');
+  assert.equal(result.view.check.status, 'PASSED');
+  assert.deepEqual(result.view.outstandingSpaceKeys, []);
 });

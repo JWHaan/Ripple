@@ -4,6 +4,7 @@
  */
 import { apiError, type WebTriggerRequestShape, type WebTriggerResponseShape } from '@ripple/contracts';
 import { loadGateDeps } from './forge/deps.ts';
+import { panelResolver as panelResolverDefinitions } from './forge/panel-resolver.ts';
 import { SYNTHETIC_PATHS, handleSyntheticRequest } from './forge/synthetic.ts';
 import { evaluateMergeCheck, toMergeCheckResponse } from './merge-check.ts';
 import { handlePullRequestEvent } from './pr-hook.ts';
@@ -42,3 +43,6 @@ export async function gateApi(request: WebTriggerRequestShape): Promise<WebTrigg
   }
   return handleGateRequest(deps.value, request);
 }
+
+/** PR overview panel resolver (Custom UI in src/frontend). */
+export const panelResolver = panelResolverDefinitions;

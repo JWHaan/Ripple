@@ -89,6 +89,7 @@ export class FakeBitbucket implements BitbucketPort {
         sourceBranch: 'feature/token',
         destinationBranch: 'main',
       },
+      authorDisplayName: this.authorAccountId === null ? null : 'Pat Author',
     };
   }
   async getPullRequest(pr: PrRef): Promise<Result<PullRequestSnapshot, BitbucketError>> {

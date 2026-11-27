@@ -38,15 +38,14 @@ modules:
         - on-code-pushed
         - on-merge
 
-  # UI phase (not built yet) — uncomment together with the panel-resolver-fn function and
-  # the panel-ui resource below once the frontend exists:
-  # bitbucket:repoPullRequestOverviewPanel:
-  #   - key: ripple-panel
-  #     title: Ripple — blast radius
-  #     resource: panel-ui
-  #     render: native
-  #     resolver:
-  #       function: panel-resolver-fn
+  # PR overview panel: Custom UI (Svelte, src/frontend) built into dist/panel by `npm run bundle`.
+  # The resolver reads Gate storage only and relays sign-off / accept-risk to Brain.
+  bitbucket:repoPullRequestOverviewPanel:
+    - key: ripple-panel
+      title: Ripple — blast radius
+      resource: panel-ui
+      resolver:
+        function: panel-resolver-fn
 
   # Inbound half of the inter-app contract: Brain -> Gate `POST /v1/verdict`.
   # Public URL; every request is authenticated in-handler with HMAC-SHA256
@@ -63,14 +62,14 @@ modules:
       handler: index.onPullRequestEvent
     - key: merge-check-fn
       handler: index.runMergeCheck
-    # - key: panel-resolver-fn
-    #   handler: index.panelResolver
+    - key: panel-resolver-fn
+      handler: index.panelResolver
     - key: gate-api-fn
       handler: index.gateApi
 
-# resources:
-#   - key: panel-ui
-#     path: src/frontend/index.tsx
+resources:
+  - key: panel-ui
+    path: dist/panel
 
 permissions:
   scopes:

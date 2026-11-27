@@ -11,6 +11,7 @@ import type {
   AnalysisKey,
   CommitSha,
   CompleteVerdict,
+  DecisionRejection,
   ContractVersion,
   DiffSummary,
   IsoDate,
@@ -132,6 +133,8 @@ export interface PullRequestSnapshot {
   readonly state: 'OPEN' | 'MERGED' | 'DECLINED' | 'SUPERSEDED';
   readonly repo: RepoDescriptor;
   readonly descriptor: PullRequestDescriptor;
+  /** Author's Bitbucket display name; Gate-only, for the panel and decision records. */
+  readonly authorDisplayName: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +271,7 @@ export type AuditEvent =
       readonly type: 'SIGNOFF_REJECTED';
       readonly spaceKey: SpaceKey;
       readonly actor: AccountId;
-      readonly reason: SignoffRejection;
+      readonly reason: PanelActionRejection;
     })
   | (AuditEventBase & { readonly type: 'RISK_ACCEPTED'; readonly exception: RiskExceptionRecord })
   | (AuditEventBase & {
@@ -304,56 +307,65 @@ export const GATE_STORAGE = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Panel <-> resolver contract
+// Panel <-> resolver contract (apps/gate/src/panel.ts <-> apps/gate/src/frontend)
 // ---------------------------------------------------------------------------
 
-export type SignoffRejection =
-  | 'NOT_ON_ROSTER'
-  | 'SPACE_NOT_REQUIRED'
-  | 'ALREADY_SIGNED'
-  | 'STALE_HEAD'
-  | 'WRONG_STATE';
-
-export type AcceptRiskRejection =
-  | 'NOT_PR_AUTHOR'
-  | 'INVALID_JUSTIFICATION'
-  | 'INVALID_DUE_DATE'
-  | 'STALE_HEAD'
-  | 'WRONG_STATE'
-  | 'TICKET_CREATION_FAILED';
+/** Why the panel could not perform an action. Brain's reasons pass through unchanged. */
+export type PanelActionRejection =
+  | DecisionRejection
+  /** The payload did not parse (bad SHA, space key, justification or date). */
+  | 'INVALID_REQUEST'
+  /** Brain or Bitbucket could not be reached or refused the call; `message` has detail. */
+  | 'UNAVAILABLE';
 
 export interface ViewerContext {
   readonly accountId: AccountId;
+  readonly displayName: string;
   readonly isPrAuthor: boolean;
-  /** Spaces the viewer is on the VERIFIED roster for, for the current record. */
+  /** Spaces whose VERIFIED roster lists the viewer, for the current record. */
   readonly rosterSpaceKeys: readonly SpaceKey[];
 }
 
+export interface PanelPullRequest {
+  readonly title: string;
+  readonly url: string;
+  readonly authorDisplayName: string | null;
+  readonly sourceBranch: string;
+  readonly destinationBranch: string;
+}
+
 export type PanelView =
-  /** No record for the current head yet (trigger not delivered, or first open). */
-  | { readonly status: 'EVALUATING'; readonly headSha: CommitSha }
+  /** Bitbucket could not be read, so the current head is unknown. */
+  | { readonly status: 'UNAVAILABLE'; readonly message: string }
+  | { readonly status: 'NOT_OPEN'; readonly prState: PullRequestSnapshot['state'] }
   | {
       readonly status: 'READY';
       readonly headSha: CommitSha;
+      readonly pullRequest: PanelPullRequest;
       readonly record: GateRecord;
-      readonly mergeOutcome: (typeof MERGE_OUTCOME)[GateState];
+      /** Exactly what the merge check returns for this record right now. */
+      readonly check: { readonly status: 'PASSED' | 'FAILED' | 'INELIGIBLE'; readonly message: string };
+      /** Required spaces with no sign-off yet (empty outside SIGNOFF_REQUIRED). */
+      readonly outstandingSpaceKeys: readonly SpaceKey[];
+      /** ANALYSIS_FAILED only: true when Ripple will retry this commit by itself. */
+      readonly willRetry: boolean;
       readonly viewer: ViewerContext;
     };
 
-/** Every mutating call echoes the head SHA the UI rendered, so stale tabs are rejected. */
+export type PanelActionResult =
+  | { readonly ok: true; readonly view: PanelView }
+  | { readonly ok: false; readonly reason: PanelActionRejection; readonly message: string; readonly view: PanelView };
+
+/** Every mutating call echoes the head SHA the UI rendered, so a stale tab is rejected. */
 export interface PanelResolverApi {
   readonly getPanelView: { readonly payload: Record<string, never>; readonly result: PanelView };
   readonly submitSignoff: {
     readonly payload: { readonly headSha: string; readonly spaceKey: string };
-    readonly result: { readonly ok: true; readonly view: PanelView } | { readonly ok: false; readonly reason: SignoffRejection };
+    readonly result: PanelActionResult;
   };
   readonly acceptRisk: {
     readonly payload: { readonly headSha: string; readonly justification: string; readonly dueDate: string };
-    readonly result: { readonly ok: true; readonly view: PanelView } | { readonly ok: false; readonly reason: AcceptRiskRejection };
-  };
-  readonly retryAnalysis: {
-    readonly payload: { readonly headSha: string };
-    readonly result: { readonly ok: true; readonly view: PanelView } | { readonly ok: false; readonly reason: 'STALE_HEAD' | 'WRONG_STATE' };
+    readonly result: PanelActionResult;
   };
 }
 

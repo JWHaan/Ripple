@@ -18,7 +18,7 @@ import type { PullRequestSnapshot } from '../types.ts';
 const pullRequestSchema = z.object({
   title: z.string(),
   state: z.enum(['OPEN', 'MERGED', 'DECLINED', 'SUPERSEDED']),
-  author: z.object({ account_id: z.string().optional() }).nullish(),
+  author: z.object({ account_id: z.string().optional(), display_name: z.string().optional() }).nullish(),
   source: z.object({ branch: z.object({ name: z.string() }), commit: z.object({ hash: z.string() }) }),
   destination: z.object({
     branch: z.object({ name: z.string() }),
@@ -94,6 +94,7 @@ export const bitbucket: BitbucketPort = {
         sourceBranch: data.source.branch.name,
         destinationBranch: data.destination.branch.name,
       },
+      authorDisplayName: data.author?.display_name ?? null,
     });
   },
 
