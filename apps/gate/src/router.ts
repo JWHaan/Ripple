@@ -69,9 +69,14 @@ async function storeDecision(deps: GateDeps, body: string): Promise<WebTriggerRe
   const record = await deps.store.getRecord(decision.key);
   if (record === null) return apiError('ANALYSIS_NOT_FOUND', 'no analysis exists for this commit');
 
+  const label = logLabel(decision.key);
   const effect = applyDecision(record, decision);
-  if (effect.kind === 'WRONG_STATE') return reply({ ...keyed, outcome: 'WRONG_STATE' });
+  if (effect.kind === 'WRONG_STATE') {
+    console.log(`decision ${decision.type} for ${label} refused: gate is ${record.state}`);
+    return reply({ ...keyed, outcome: 'WRONG_STATE' });
+  }
   const next = effect.record;
+  console.log(`decision ${decision.type} for ${label}: ${record.state} -> ${next.state}${effect.changed ? '' : ' (no change)'}`);
   if (effect.changed) {
     await deps.store.putRecord(next);
     if (decision.type === 'SIGNOFF' && 'signoffs' in next) {

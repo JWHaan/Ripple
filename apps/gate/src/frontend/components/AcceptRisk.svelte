@@ -25,7 +25,7 @@
     <div>
       <h2>Accept the risk instead</h2>
       <p class="lede">
-        Merge without the missing sign-offs. Ripple files a Jira ticket with this evidence, assigns the follow-up, and
+        Merge without the missing sign-offs. Ripple files a Jira ticket with this evidence and a due date, and
         links it to this commit.
         {#if !isPrAuthor}Only the PR author or the lead of the service’s Jira space can do this.{/if}
       </p>
