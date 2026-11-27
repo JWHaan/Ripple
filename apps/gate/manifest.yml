@@ -78,7 +78,7 @@ permissions:
   scopes:
     # PR events, merge-check subscription, PR metadata and diff.
     - read:pullrequest:bitbucket
-    # Read compass.yml / compass.yaml at the PR head commit, and repo full_name / URL.
+    # Read ripple.yml from the PR's destination branch (then head commit), and repo full_name / URL.
     - read:repository:bitbucket
     # Gate state, signoffs, audit log (Forge KVS).
     - storage:app

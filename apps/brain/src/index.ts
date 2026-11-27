@@ -12,7 +12,6 @@ import {
 } from '@ripple/contracts';
 import { z } from 'zod';
 import { loadBrainDeps } from './forge/deps.ts';
-import { PROBE_PATH, handleProbeRequest, probeJobSchema, runGraphProbe } from './forge/probe.ts';
 import { store } from './forge/store.ts';
 import { handleBrainRequest } from './router.ts';
 import { runAnalysisJob } from './worker.ts';
@@ -23,17 +22,12 @@ export async function brainApi(request: WebTriggerRequestShape, context: unknown
     console.error(`ripple brain misconfigured: ${deps.error.missing} is not set`);
     return apiError('INTERNAL', 'brain is not configured');
   }
-  // Smoke-test diagnostic route; see forge/probe.ts.
-  if (request.userPath === PROBE_PATH) return handleProbeRequest(request, deps.value.verifyKeys);
   return handleBrainRequest(deps.value, request);
 }
 
 const jobSchema = z.object({ body: z.object({ key: analysisKeySchema }) });
 
 export async function runAnalysis(event: unknown, context: unknown): Promise<void> {
-  const probe = decodeValue(probeJobSchema, event);
-  if (probe.ok) return runGraphProbe(probe.value.body.probe);
-
   const job = decodeValue(jobSchema, event);
   if (!job.ok) {
     console.error(`ripple brain dropped a malformed analysis job: ${job.error.message}`);
