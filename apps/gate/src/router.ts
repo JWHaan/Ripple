@@ -15,7 +15,7 @@ import {
   type WebTriggerRequestShape,
   type WebTriggerResponseShape,
 } from '@ripple/contracts';
-import { appendAudit } from './intake.ts';
+import { appendAudit, logLabel } from './intake.ts';
 import type { GateDeps } from './ports.ts';
 import { applyDecision, applyVerdict, awaitsVerdict } from './state.ts';
 
@@ -29,19 +29,29 @@ async function storeVerdict(deps: GateDeps, body: string): Promise<WebTriggerRes
     jsonResponse(200, { v: CONTRACT_VERSION, key: verdict.key, outcome } satisfies VerdictPushResponse);
 
   // A verdict for anything but the current head is discarded: it can never gate a merge.
+  const label = logLabel(verdict.key);
   const pointer = await deps.store.getPointer(pr);
-  if (pointer !== null && pointer.headSha !== headSha) return reply('STALE_SHA');
+  if (pointer !== null && pointer.headSha !== headSha) {
+    console.log(`verdict for ${label} discarded: head has moved to ${pointer.headSha}`);
+    return reply('STALE_SHA');
+  }
 
   const record = await deps.store.getRecord(verdict.key);
   // Gate only accepts verdicts for analyses it asked for.
   if (record === null || record.state === 'NO_SENSITIVE_SURFACE') {
+    console.log(`verdict for ${label} refused: no analysis was requested (${record?.state ?? 'no record'})`);
     return apiError('ANALYSIS_NOT_FOUND', 'no analysis was requested for this commit');
   }
   // Redelivery after a decision exists must not reset sign-offs or an accepted risk.
-  if (!awaitsVerdict(record)) return reply('STORED');
+  if (!awaitsVerdict(record)) {
+    console.log(`verdict for ${label} redelivered; keeping ${record.state}`);
+    return reply('STORED');
+  }
 
-  await deps.store.putRecord(applyVerdict(record, verdict, isoNow(deps.now())));
+  const next = applyVerdict(record, verdict, isoNow(deps.now()));
+  await deps.store.putRecord(next);
   await appendAudit(deps, verdict.key, { type: 'VERDICT_RECEIVED', status: verdict.status });
+  console.log(`verdict for ${label} (pushed): ${record.state} -> ${next.state} (${verdict.status})`);
   return reply('STORED');
 }
 

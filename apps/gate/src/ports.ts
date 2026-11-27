@@ -22,6 +22,12 @@ export interface GateStore {
   setPointer(pointer: PrPointer): Promise<void>;
   getRecord(key: AnalysisKey): Promise<GateRecord | null>;
   putRecord(record: GateRecord): Promise<void>;
+  /**
+   * Atomically claims the right to send analysis `attempt` for `key` to Brain. Exactly one
+   * concurrent caller gets `true`. Claims expire after DISPATCH_CLAIM_TTL_SECONDS, so a
+   * claimant that dies before writing a record cannot block the head forever.
+   */
+  claimDispatch(key: AnalysisKey, attempt: number): Promise<boolean>;
   appendAudit(event: AuditEvent): Promise<void>;
 }
 

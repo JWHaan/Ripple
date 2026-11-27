@@ -136,6 +136,21 @@ test('PR hook: a sensitive diff dispatches one analyze request keyed by the full
   assert.equal(GATE_STORAGE.record(request.key), `gate:${TEST_PR.workspaceUuid}:${TEST_PR.repoUuid}:7:${SHA_A}`);
 });
 
+test('PR hook and merge check racing on the same head send Brain exactly one analyze request', async () => {
+  const h = gateHarness();
+  sensitive(h);
+  const [, outcome] = await Promise.all([handlePullRequestEvent(h.deps, prEvent), evaluateMergeCheck(h.deps, checkEvent)]);
+  assert.equal(h.brain.requests.length, 1);
+  assert.equal(outcome.state, 'ANALYSIS_PENDING');
+  assert.equal(outcome.status, 'FAILED');
+  assert.equal(await stateOf(h), 'ANALYSIS_PENDING');
+
+  // A retry after the pending analysis goes stale is a new attempt with its own claim.
+  h.clock.now = new Date(h.clock.now.getTime() + PENDING_STALE_MS + 1);
+  await Promise.all([handlePullRequestEvent(h.deps, prEvent), evaluateMergeCheck(h.deps, checkEvent)]);
+  assert.equal(h.brain.requests.length, 2);
+});
+
 test('PR hook: Brain being unreachable or Bitbucket failing mid-way fails closed, and retries are capped', async () => {
   const h = gateHarness();
   sensitive(h);

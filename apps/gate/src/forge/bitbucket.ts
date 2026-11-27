@@ -101,9 +101,12 @@ export const bitbucket: BitbucketPort = {
     const ws = wrap(snapshot.ref.workspaceUuid);
     const repo = wrap(snapshot.ref.repoUuid);
     // Pinned to the head SHA (not "the PR's current diff") so the result cannot drift mid-evaluation.
-    const spec = `${snapshot.headSha}..${snapshot.destinationCommit}`;
+    // The `..` must stay in the template literal: `route` rejects any interpolated value
+    // containing `..` as a path manipulation attempt.
+    const head = snapshot.headSha;
+    const base = snapshot.destinationCommit;
     const response = await call(
-      () => api.asApp().requestBitbucket(route`/2.0/repositories/${ws}/${repo}/diff/${spec}`),
+      () => api.asApp().requestBitbucket(route`/2.0/repositories/${ws}/${repo}/diff/${head}..${base}`),
       'read diff',
     );
     if (!response.ok) return response;

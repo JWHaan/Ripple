@@ -21,10 +21,21 @@ import { EMPTY_DIFF, applyVerdict, failed, invalidatedBy, noRippleConfig, noSens
 import {
   MAX_ANALYSIS_ATTEMPTS,
   PENDING_STALE_MS,
+  type AnalysisPendingRecord,
   type AuditEvent,
   type GateRecord,
   type PullRequestSnapshot,
 } from './types.ts';
+
+/** Log prefix matching Brain's `PR <id> @ <sha>` so the two apps' lines can be read together. */
+export function logLabel(key: AnalysisKey): string {
+  return `PR ${key.prId} @ ${key.headSha}`;
+}
+
+/** Another caller (hook or merge check) won the dispatch claim and owns the Brain request. */
+interface AlreadyDispatched {
+  readonly alreadyDispatched: AnalysisPendingRecord;
+}
 
 /** Diffs larger than this are classified on their first N characters and marked truncated. */
 export const MAX_DIFF_CHARS = 2_000_000;
@@ -82,7 +93,7 @@ async function analyse(
   snapshot: PullRequestSnapshot,
   key: AnalysisKey,
   attempt: number,
-): Promise<GateRecord> {
+): Promise<GateRecord | AlreadyDispatched> {
   const at = () => isoNow(deps.now());
   const fail = (diff: DiffSummary, error: BitbucketError) =>
     failed(key, diff, attempt, { code: 'DIFF_UNAVAILABLE', message: error.message, retryable: error.kind !== 'FORBIDDEN' }, at());
@@ -93,6 +104,12 @@ async function analyse(
   const oversized = diffText.value.length > MAX_DIFF_CHARS;
   const diff = classifyDiff(oversized ? diffText.value.slice(0, MAX_DIFF_CHARS) : diffText.value, oversized);
   await audit(deps, key, { type: 'CLASSIFIED', sensitive: diff.findings.length > 0, findingCount: diff.findings.length });
+  const hits = [...new Set(diff.findings.map((finding) => `${finding.ruleId} (${finding.filePath})`))];
+  console.log(
+    `classified ${logLabel(key)}: ${diff.findings.length} finding(s)` +
+      (hits.length > 0 ? `: ${hits.join(', ')}` : '') +
+      (oversized ? ' [diff truncated]' : ''),
+  );
 
   // Blast radius is zero by construction: nothing sensitive was touched.
   if (diff.findings.length === 0) return noSensitiveSurface(key, at());
@@ -114,17 +131,27 @@ async function analyse(
     service: declared.value,
   };
 
-  // Persist PENDING before the call so a verdict push that races the response finds a record.
   const waiting = pending(key, diff, attempt, at());
+  // The PR hook and the merge check usually evaluate a new head within seconds of each
+  // other; only the first to claim this attempt calls Brain.
+  if (!(await deps.store.claimDispatch(key, attempt))) {
+    console.log(`analysis attempt ${attempt} for ${logLabel(key)} already dispatched by another invocation; not sending again`);
+    return { alreadyDispatched: waiting };
+  }
+
+  // Persist PENDING before the call so a verdict push that races the response finds a record.
   await deps.store.putRecord(waiting);
   await audit(deps, key, { type: 'ANALYSIS_REQUESTED', attempt });
+  console.log(`analysis attempt ${attempt} requested from Brain for ${logLabel(key)}`);
 
   const response = await deps.brain.analyze(request);
   if (!response.ok) return failed(key, diff, attempt, brainFailure(response.error), at());
   if (response.value.state !== 'COMPLETE') return waiting;
 
   await audit(deps, key, { type: 'VERDICT_RECEIVED', status: response.value.verdict.status });
-  return applyVerdict(waiting, response.value.verdict, at());
+  const decided = applyVerdict(waiting, response.value.verdict, at());
+  console.log(`verdict for ${logLabel(key)} (in response): ${waiting.state} -> ${decided.state} (${response.value.verdict.status})`);
+  return decided;
 }
 
 export async function evaluateHead(deps: GateDeps, pr: PrRef): Promise<IntakeOutcome> {
@@ -142,7 +169,13 @@ export async function evaluateHead(deps: GateDeps, pr: PrRef): Promise<IntakeOut
   }
 
   const attempt = existing !== null && 'attempts' in existing ? existing.attempts + 1 : 1;
-  const record = await analyse(deps, snapshot, key, attempt);
+  const analysed = await analyse(deps, snapshot, key, attempt);
+  if ('alreadyDispatched' in analysed) {
+    // The claimant owns the record; report what it has stored so far without writing.
+    const latest = await deps.store.getRecord(key);
+    return { kind: 'EVALUATED', snapshot, record: latest ?? analysed.alreadyDispatched };
+  }
+  const record = analysed;
 
   // A verdict push may have landed while we were waiting on Brain; never overwrite a decision.
   const latest = await deps.store.getRecord(key);

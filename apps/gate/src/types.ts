@@ -29,6 +29,13 @@ import { analysisKeyString, prKeyString } from '@ripple/contracts';
 export const MAX_ANALYSIS_ATTEMPTS = 3;
 /** A pending analysis older than this is assumed lost and re-dispatched on the next evaluation. */
 export const PENDING_STALE_MS = 3 * 60 * 1000;
+/** Lifetime of a dispatch claim; matches PENDING_STALE_MS so a lost claimant is retried on the same schedule. */
+export const DISPATCH_CLAIM_TTL_SECONDS = PENDING_STALE_MS / 1000;
+
+export interface DispatchClaim {
+  readonly attempt: number;
+  readonly claimedAt: IsoTimestamp;
+}
 
 // ---------------------------------------------------------------------------
 // Environment (set with `forge variables set`, never committed)
@@ -288,6 +295,8 @@ export const GATE_STORAGE = {
   pointer: (pr: PrRef): string => `pr:${prKeyString(pr)}`,
   /** -> GateRecord */
   record: (key: AnalysisKey): string => `gate:${analysisKeyString(key)}`,
+  /** -> DispatchClaim. Written once with FAIL_IF_EXISTS; expires after DISPATCH_CLAIM_TTL_SECONDS. */
+  claim: (key: AnalysisKey, attempt: number): string => `claim:${analysisKeyString(key)}:${attempt}`,
   /** -> AuditEvent. Sorts chronologically under `auditPrefix`. */
   audit: (event: Pick<AuditEvent, 'pr' | 'at' | 'id'>): string =>
     `audit:${prKeyString(event.pr)}:${event.at.replace(/[^0-9]/g, '')}:${event.id}`,

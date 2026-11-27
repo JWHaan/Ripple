@@ -54,6 +54,13 @@ export class MemoryGateStore implements GateStore {
   async putRecord(record: GateRecord): Promise<void> {
     this.records.set(analysisKeyString(record.key), record);
   }
+  readonly claims = new Set<string>();
+  async claimDispatch(key: AnalysisKey, attempt: number): Promise<boolean> {
+    const claimKey = `${analysisKeyString(key)}:${attempt}`;
+    if (this.claims.has(claimKey)) return false;
+    this.claims.add(claimKey);
+    return true;
+  }
   async appendAudit(event: AuditEvent): Promise<void> {
     this.audit.push(event);
   }
