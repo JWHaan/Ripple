@@ -34,8 +34,11 @@ modules:
         Blocks merge until every downstream owning team has signed off on the
         current commit, or the author has accepted the risk and a Jira ticket
         has been filed.
+      # on-reviewer-status-changed re-reads the stored gate when someone approves, so the
+      # native check reflects a sign-off or accepted risk without another push.
       triggers:
         - on-code-pushed
+        - on-reviewer-status-changed
         - on-merge
 
   # PR overview panel: Custom UI (Svelte, src/frontend) built into dist/panel by `npm run bundle`.

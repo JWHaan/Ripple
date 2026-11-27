@@ -91,7 +91,7 @@ export interface PullRequestEvent {
   };
 }
 
-export type MergeCheckTriggerType = 'on-code-pushed' | 'on-merge';
+export type MergeCheckTriggerType = 'on-code-pushed' | 'on-reviewer-status-changed' | 'on-merge';
 
 /**
  * https://developer.atlassian.com/platform/forge/manifest-reference/modules/bitbucket-merge-check/

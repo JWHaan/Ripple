@@ -65,6 +65,15 @@ export function signoffEligibility(
   return member === undefined ? { ok: false, reason: 'NOT_ON_ROSTER' } : { ok: true, value: { signer: member, authorization: 'ROSTER_MEMBER' } };
 }
 
+/** Matches Gate's `PR <id> @ <sha>` prefix so the two apps' log lines read as one trace. */
+const logLabel = (key: AnalysisKey): string => `PR ${key.prId} @ ${key.headSha}`;
+
+function logPushed(what: string, key: AnalysisKey, pushed: Pushed): void {
+  if (pushed.ok) console.log(`${what} for ${logLabel(key)} pushed to Gate; gate now ${pushed.gateState}`);
+  else if ('reason' in pushed) console.log(`${what} for ${logLabel(key)} refused by Gate: ${pushed.reason}`);
+  else console.error(`${what} for ${logLabel(key)} could not be pushed to Gate: ${pushed.transport}`);
+}
+
 type Pushed = { readonly ok: true; readonly gateState: GateDecisionState } | { readonly ok: false; readonly reason: DecisionRejection } | { readonly ok: false; readonly transport: string };
 
 async function push(deps: BrainDeps, decision: Decision): Promise<Pushed> {
@@ -87,12 +96,21 @@ export async function handleSignoff(deps: BrainDeps, body: string): Promise<WebT
   const keyed = { v: CONTRACT_VERSION, key };
   const reject = (reason: DecisionRejection) => jsonResponse(200, { ...keyed, outcome: 'REJECTED', reason } satisfies SignoffResponse);
 
+  const what = `sign-off ${spaceKey} by ${actor.accountId}`;
   const target = await subject(deps, key);
-  if (target === null) return reject('ANALYSIS_NOT_COMPLETE');
+  if (target === null) {
+    console.log(`${what} for ${logLabel(key)} refused: ANALYSIS_NOT_COMPLETE`);
+    return reject('ANALYSIS_NOT_COMPLETE');
+  }
   const eligible = signoffEligibility(target, spaceKey, actor);
-  if (!eligible.ok) return reject(eligible.reason);
+  if (!eligible.ok) {
+    console.log(`${what} for ${logLabel(key)} refused: ${eligible.reason}`);
+    return reject(eligible.reason);
+  }
+  console.log(`${what} for ${logLabel(key)} eligible: ${eligible.value.authorization} (${eligible.value.signer.displayName})`);
 
   const pushed = await push(deps, { type: 'SIGNOFF', key, spaceKey, ...eligible.value, decidedAt: isoNow(deps.now()) });
+  logPushed(what, key, pushed);
   if (pushed.ok) return jsonResponse(200, { ...keyed, outcome: 'RECORDED', gateState: pushed.gateState } satisfies SignoffResponse);
   return 'reason' in pushed ? reject(pushed.reason) : apiError('GATE_PUSH_FAILED', pushed.transport);
 }
@@ -148,18 +166,35 @@ export function buildRiskIssue(
 
 async function ticketFor(deps: BrainDeps, target: Subject, request: AcceptRiskRequest, acceptedAs: 'PR_AUTHOR' | 'SERVICE_LEAD'): Promise<Result<{ ticket: RiskTicket; created: boolean }, TicketError>> {
   // One ticket per commit: first the local record, then Jira itself in case that write was lost.
+  const label = logLabel(request.key);
   const known = await deps.store.getException(request.key);
-  if (known !== null) return { ok: true, value: { ticket: known.ticket, created: false } };
+  if (known !== null) {
+    console.log(`risk ticket for ${label}: ${known.ticket.issueKey} already recorded; not creating another`);
+    return { ok: true, value: { ticket: known.ticket, created: false } };
+  }
   const project = deps.tickets.target();
-  if (!project.ok) return project;
-  const existing = await deps.tickets.findByLabel(riskTicketLabel(request.key));
-  if (!existing.ok) return existing;
+  if (!project.ok) {
+    console.error(`risk ticket for ${label}: ${project.error.message}`);
+    return project;
+  }
+  const idempotencyLabel = riskTicketLabel(request.key);
+  const existing = await deps.tickets.findByLabel(idempotencyLabel);
+  if (!existing.ok) {
+    console.error(`risk ticket for ${label}: Jira search failed: ${existing.error.message}`);
+    return existing;
+  }
   let ticket = existing.value;
   const created = ticket === null;
   if (ticket === null) {
     const made = await deps.tickets.create(buildRiskIssue(target, request, acceptedAs, project.value));
-    if (!made.ok) return made;
+    if (!made.ok) {
+      console.error(`risk ticket for ${label}: create in ${project.value.projectKey} (${project.value.issueType}) failed: ${made.error.message}`);
+      return made;
+    }
     ticket = made.value;
+    console.log(`risk ticket for ${label}: created ${ticket.issueKey} in ${project.value.projectKey} (${project.value.issueType}), due ${request.dueDate}`);
+  } else {
+    console.log(`risk ticket for ${label}: found ${ticket.issueKey} by label ${idempotencyLabel}; reusing it`);
   }
   await deps.store.putException({ v: CONTRACT_VERSION, key: request.key, acceptedBy: request.actor, ticket, createdAt: isoNow(deps.now()) });
   return { ok: true, value: { ticket, created } };
@@ -172,9 +207,14 @@ export async function handleAcceptRisk(deps: BrainDeps, body: string): Promise<W
   const keyed = { v: CONTRACT_VERSION, key: request.key };
   const reject = (reason: DecisionRejection) => jsonResponse(200, { ...keyed, outcome: 'REJECTED', reason } satisfies AcceptRiskResponse);
 
+  const what = `accept-risk by ${request.actor.accountId}`;
+  const refuse = (reason: DecisionRejection) => {
+    console.log(`${what} for ${logLabel(request.key)} refused: ${reason}`);
+    return reject(reason);
+  };
   const target = await subject(deps, request.key);
-  if (target === null) return reject('ANALYSIS_NOT_COMPLETE');
-  if (target.verdict.signoffRequirements.length === 0) return reject('WRONG_STATE');
+  if (target === null) return refuse('ANALYSIS_NOT_COMPLETE');
+  if (target.verdict.signoffRequirements.length === 0) return refuse('WRONG_STATE');
 
   let acceptedAs: 'PR_AUTHOR' | 'SERVICE_LEAD';
   if (request.actor.accountId === target.pullRequest.authorAccountId) {
@@ -182,9 +222,10 @@ export async function handleAcceptRisk(deps: BrainDeps, body: string): Promise<W
   } else {
     const serviceSpace = await deps.spaces.getSpace(target.verdict.service.spaceKey);
     if (!serviceSpace.ok) return apiError('JIRA_FAILED', serviceSpace.error.message);
-    if (serviceSpace.value?.lead?.accountId !== request.actor.accountId) return reject('NOT_AUTHORIZED');
+    if (serviceSpace.value?.lead?.accountId !== request.actor.accountId) return refuse('NOT_AUTHORIZED');
     acceptedAs = 'SERVICE_LEAD';
   }
+  console.log(`${what} for ${logLabel(request.key)} eligible as ${acceptedAs}`);
 
   const ticket = await ticketFor(deps, target, request, acceptedAs);
   if (!ticket.ok) return apiError('JIRA_FAILED', `${ticket.error.kind}: ${ticket.error.message}`);
@@ -199,6 +240,7 @@ export async function handleAcceptRisk(deps: BrainDeps, body: string): Promise<W
     ticket: ticket.value.ticket,
     decidedAt: isoNow(deps.now()),
   });
+  logPushed(`accept-risk (${ticket.value.ticket.issueKey})`, request.key, pushed);
   if (pushed.ok) return jsonResponse(200, { ...keyed, outcome: 'RECORDED', ...ticket.value, gateState: pushed.gateState } satisfies AcceptRiskResponse);
   return 'reason' in pushed ? reject(pushed.reason) : apiError('GATE_PUSH_FAILED', pushed.transport);
 }

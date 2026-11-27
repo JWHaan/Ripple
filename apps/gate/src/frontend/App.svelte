@@ -75,6 +75,14 @@
     return () => clearTimeout(timer);
   });
 
+  /** The merge check's own text, except where it points at this panel. */
+  function statusLine(current: Extract<PanelView, { status: 'READY' }>): string {
+    if (current.record.state !== 'SIGNOFF_REQUIRED') return current.check.message;
+    const waiting = current.outstandingSpaceKeys;
+    const total = current.record.verdict.signoffRequirements.length;
+    return `Waiting on ${waiting.length} of ${total} downstream sign-off${total === 1 ? '' : 's'}: ${waiting.join(', ')}. Or accept the risk below.`;
+  }
+
   const LIKELIHOOD_TONE = { LOW: 'ok', MEDIUM: 'warn', HIGH: 'danger' } as const;
 </script>
 
@@ -105,7 +113,7 @@
     <section class="card status" data-check={view.check.status}>
       <div class="check">
         <span class="verdict">{view.check.status === 'FAILED' ? 'Merge blocked' : view.check.status === 'PASSED' ? 'Merge allowed' : 'Not gated'}</span>
-        <p>{view.check.message.replace(/^\[\w+\]\s*/, '')}</p>
+        <p>{statusLine(view)}</p>
       </div>
       <dl class="facts">
         <div><dt>Commit</dt><dd class="mono">{shortSha(view.headSha)}</dd></div>
