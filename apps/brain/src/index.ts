@@ -8,6 +8,7 @@ import {
   decodeValue,
   type WebTriggerRequestShape,
   type WebTriggerResponseShape,
+  type Verdict,
 } from '@ripple/contracts';
 import { z } from 'zod';
 import { loadBrainDeps } from './forge/deps.ts';
@@ -53,4 +54,20 @@ export async function runAnalysis(event: unknown, context: unknown): Promise<voi
       ? `analysis ${outcome.verdict.status} for PR ${key.prId} @ ${key.headSha} (pushed: ${outcome.pushed})`
       : `analysis skipped: ${outcome.reason}`,
   );
+  if (outcome.kind === 'DONE') for (const line of describeVerdict(outcome.verdict)) console.log(`  ${line}`);
+}
+
+/** One line per downstream space: how ownership resolved and who may sign. Names only, no ids. */
+function describeVerdict(verdict: Verdict): string[] {
+  if (verdict.status === 'FAILED') return [`failed ${verdict.error.code}: ${verdict.error.message}`];
+  const spaces = verdict.signoffRequirements.map((requirement) => {
+    const owners = requirement.ownership.teams.map((team) => team.displayName).join(', ') || requirement.ownership.lead?.displayName || 'none';
+    const roster =
+      requirement.roster.status === 'VERIFIED'
+        ? `VERIFIED roster of ${requirement.roster.members.length}: ${requirement.roster.members.map((member) => member.displayName).join(', ')}`
+        : `DEGRADED roster (${requirement.roster.reason})`;
+    return `${requirement.spaceKey}: owners ${owners} via ${requirement.ownership.source}; ${roster}`;
+  });
+  const narrative = verdict.narrative.status === 'GROUNDED' ? `narrative GROUNDED (${verdict.narrative.breakingLikelihood})` : `narrative UNAVAILABLE (${verdict.narrative.reason})`;
+  return spaces.length === 0 ? ['no downstream sign-off required', narrative] : [...spaces, narrative];
 }
