@@ -4,3 +4,15 @@ dist/
 .env
 .env.*
 .DS_Store
+
+# Internal notes, AI agent instructions and scratch files (kept local, never published)
+.internal/
+AGENTS.md
+CLAUDE.md
+PROMPT.md
+PLAN.md
+BUILD.md
+DEMO-SCRIPT.md
+*.local.md
+scratch/
+.claude/
